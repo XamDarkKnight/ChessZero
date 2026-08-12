@@ -1,0 +1,82 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Ultimate Chess Arena lets you play locally with a friend, compete in timed blitz matches, or challenge chess bots with different difficulty levels.">
+  <meta name="keywords" content="chess, blitz chess, multiplayer chess, chess bots, local chess, browser chess game">
+  <meta name="author" content="Wandile Mlangeni">
+  <meta name="theme-color" content="#e2271e">
+  <meta property="og:title" content="Ultimate Chess Arena">
+  <meta property="og:description" content="Play local chess, timed blitz, or challenge bots at different difficulty levels.">
+  <meta property="og:type" content="website">
+  <title>Ultimate Chess Arena</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body class="theme-classic">
+  <noscript>
+    <div class="noscript-message" role="alert">
+      Ultimate Chess Arena requires JavaScript. Enable JavaScript in your browser, then reload the page.
+    </div>
+  </noscript>
+
+  <main class="app">
+    <section class="board-wrap" aria-label="Chessboard area">
+      <div id="board" class="board" role="grid" aria-label="Interactive chessboard"></div>
+    </section>
+
+    <aside class="panel" aria-label="Game controls and information">
+      <header class="game-header">
+        <p class="eyebrow">Ultimate Chess</p>
+        <h1>Ultimate Chess Arena</h1>
+        <p class="subtitle">Play with a friend, compete in blitz, or challenge a bot.</p>
+      </header>
+
+      <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true">
+        White to move.
+      </div>
+
+      <div class="controls">
+        <button class="ctrl danger" onclick="newGame()">New Game</button>
+        <button class="ctrl" onclick="undoMove()">Undo</button>
+        <button class="ctrl" onclick="flipBoard()">Flip Board</button>
+      </div>
+
+      <label class="theme-label" for="themeSelect">Change board theme</label>
+      <select id="themeSelect" class="theme-select">
+        <option value="classic">Classic Wood</option>
+        <option value="ice">Ice Blue</option>
+        <option value="forest">Forest Green</option>
+        <option value="midnight">Midnight</option>
+        <option value="royal">Royal Red</option>
+      </select>
+
+      <div class="rules">
+        <h3>Rules Active</h3>
+        <ul>
+          <li>Legal piece movement</li>
+          <li>Check detection</li>
+          <li>Checkmate detection</li>
+          <li>Stalemate detection</li>
+          <li>Castling</li>
+          <li>En passant</li>
+          <li>Pawn promotion</li>
+          <li>No illegal king moves</li>
+          <li>Kings cannot touch</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <div id="checkToast" class="check-toast">CHECK!</div>
+
+  <div id="endOverlay" class="end-overlay">
+    <div class="end-card">
+      <div id="endTitle" class="end-title">CHECKMATE</div>
+      <div id="endMessage" class="end-message"></div>
+      <button class="end-btn" onclick="newGame()">Play Again</button>
+    </div>
+  </div>
+</body>
+</html>
