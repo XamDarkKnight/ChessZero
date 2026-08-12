@@ -1,0 +1,14 @@
+{
+  "name": "Chess Zeo Dev Container",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:0-20",
+  "postCreateCommand": "npm install",
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "remoteUser": "node"
+}

@@ -37,6 +37,23 @@
         White to move.
       </div>
 
+      <div id="networkPanel" class="settings-section">
+        <h3>Online Play</h3>
+        <div class="network-row">
+          <input id="networkServer" class="theme-select" type="text" placeholder="ws://localhost:3000">
+        </div>
+        <div class="network-row">
+          <input id="roomIdInput" class="theme-select" type="text" placeholder="Room code">
+        </div>
+        <div class="network-actions">
+          <button id="createRoomBtn" class="ctrl danger" type="button">Create Room</button>
+          <button id="joinRoomBtn" class="ctrl" type="button">Join Room</button>
+          <button id="leaveRoomBtn" class="ctrl" type="button" disabled>Leave Room</button>
+        </div>
+        <div id="networkStatus" class="network-status">Offline mode. Enter a room code and connect.</div>
+        <div id="roomShare" class="network-share"></div>
+      </div>
+
       <div class="controls">
         <button class="ctrl danger" onclick="newGame()">New Game</button>
         <button class="ctrl" onclick="undoMove()">Undo</button>

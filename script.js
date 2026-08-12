@@ -27,6 +27,16 @@ let enPassantTarget;
 let castlingRights;
 
 let showSuggestions = true;
+let lastCheckToastTurn = null;
+
+let socket = null;
+let roomId = null;
+let networkPlayerColor = null;
+let isOnline = false;
+let isRoomOwner = false;
+let connectedPlayers = 0;
+let pendingSocketActions = [];
+const DEFAULT_NETWORK_SERVER = "ws://localhost:3000";
 
 /* =========================================================
    ULTIMATE GAME MODE SETTINGS
@@ -269,6 +279,16 @@ function isTimedMode() {
 ========================================================= */
 
 function newGame() {
+  if (isOnline && roomId && socket && socket.readyState === WebSocket.OPEN) {
+    sendNetworkMessage({
+      type: "resetRoom",
+      roomId,
+      state: getNetworkState()
+    });
+    updateNetworkMessage("Resetting online game...");
+    return;
+  }
+
   stopTimerLoop();
   clearRobotMoveTimeout();
 
@@ -380,7 +400,6 @@ function updateGameText() {
 
 function renderStatus() {
   const status = document.getElementById("status");
-  let lastCheckToastTurn = null;
   if (!status) return;
 
   if (gameOver) return;
@@ -394,6 +413,11 @@ function renderStatus() {
       status.textContent = "Choose your bot and blitz time, then press Start Match.";
     }
 
+    return;
+  }
+
+  if (isOnline && connectedPlayers < 2) {
+    status.textContent = "Waiting for opponent to join...";
     return;
   }
 
@@ -418,12 +442,13 @@ function renderStatus() {
   }
 
   const side = turn === "w" ? "White" : "Black";
+  const networkSuffix = isOnline ? ` (${networkPlayerColor === turn ? "Your move" : "Opponent's move"})` : "";
 
   if (isInCheck(turn)) {
-    status.textContent = `${side} to move — CHECK!`;
+    status.textContent = `${side} to move — CHECK!${networkSuffix}`;
     showCheckToast();
   } else {
-    status.textContent = `${side} to move.`;
+    status.textContent = `${side} to move.${networkSuffix}`;
   }
 }
 
@@ -529,6 +554,20 @@ function clickSquare(r, c) {
     return;
   }
 
+  if (isOnline) {
+    if (connectedPlayers < 2) {
+      const status = document.getElementById("status");
+      if (status) status.textContent = "Waiting for opponent to join.";
+      return;
+    }
+
+    if (turn !== networkPlayerColor) {
+      const status = document.getElementById("status");
+      if (status) status.textContent = "Waiting for your opponent's move.";
+      return;
+    }
+  }
+
   if (isTimedMode()) {
     syncActiveClock();
     if (gameOver) return;
@@ -543,6 +582,15 @@ function clickSquare(r, c) {
     const move = legalMoves.find(m => m.r === r && m.c === c);
 
     if (move) {
+      if (isOnline) {
+        makeMove(selected.r, selected.c, r, c, move);
+        sendNetworkMove(selected.r, selected.c, r, c, move);
+        selected = null;
+        legalMoves = [];
+        render();
+        return;
+      }
+
       makeMove(selected.r, selected.c, r, c, move);
       selected = null;
       legalMoves = [];
@@ -2052,6 +2100,243 @@ function setupThemeChanger() {
   });
 }
 
+function getNetworkServerUrl() {
+  const serverInput = document.getElementById("networkServer");
+  return serverInput && serverInput.value.trim()
+    ? serverInput.value.trim()
+    : DEFAULT_NETWORK_SERVER;
+}
+
+function setupNetworkControls() {
+  const roomInput = document.getElementById("roomIdInput");
+  const serverInput = document.getElementById("networkServer");
+  const createBtn = document.getElementById("createRoomBtn");
+  const joinBtn = document.getElementById("joinRoomBtn");
+  const leaveBtn = document.getElementById("leaveRoomBtn");
+
+  if (!roomInput || !serverInput || !createBtn || !joinBtn || !leaveBtn) return;
+
+  createBtn.onclick = () => {
+    createRoom();
+  };
+
+  joinBtn.onclick = () => {
+    const roomCode = roomInput.value.trim();
+    if (!roomCode) {
+      updateNetworkMessage("Enter a room code first.");
+      return;
+    }
+    joinRoom(roomCode);
+  };
+
+  leaveBtn.onclick = leaveRoom;
+
+  if (!serverInput.value.trim()) {
+    serverInput.value = DEFAULT_NETWORK_SERVER;
+  }
+
+  updateNetworkStatus();
+}
+
+function updateNetworkMessage(message) {
+  const share = document.getElementById("roomShare");
+  if (!share) return;
+  share.textContent = message;
+}
+
+function updateNetworkStatus() {
+  const statusEl = document.getElementById("networkStatus");
+  const leaveBtn = document.getElementById("leaveRoomBtn");
+  if (!statusEl || !leaveBtn) return;
+
+  if (isOnline) {
+    const player = networkPlayerColor ? networkPlayerColor.toUpperCase() : "N/A";
+    statusEl.textContent = `Online room ${roomId} as ${player} — ${connectedPlayers}/2 connected.`;
+    leaveBtn.disabled = false;
+  } else {
+    statusEl.textContent = "Offline mode. Enter a room code and connect.";
+    leaveBtn.disabled = true;
+  }
+}
+
+function connectSocket() {
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+
+  const url = getNetworkServerUrl();
+  socket = new WebSocket(url);
+
+  socket.addEventListener("open", () => {
+    updateNetworkMessage("Connected to server.");
+    processPendingNetworkActions();
+    updateNetworkStatus();
+  });
+
+  socket.addEventListener("close", () => {
+    isOnline = false;
+    roomId = null;
+    networkPlayerColor = null;
+    connectedPlayers = 0;
+    socket = null;
+    updateNetworkMessage("Disconnected from server.");
+    updateNetworkStatus();
+    render();
+  });
+
+  socket.addEventListener("error", () => {
+    updateNetworkMessage("Unable to connect. Check the server URL.");
+    updateNetworkStatus();
+  });
+
+  socket.addEventListener("message", event => {
+    try {
+      const msg = JSON.parse(event.data);
+      handleNetworkMessage(msg);
+    } catch (error) {
+      console.error("Invalid network message", error, event.data);
+    }
+  });
+}
+
+function processPendingNetworkActions() {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  pendingSocketActions.forEach(message => socket.send(JSON.stringify(message)));
+  pendingSocketActions = [];
+}
+
+function sendNetworkMessage(message) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    pendingSocketActions.push(message);
+    connectSocket();
+    return;
+  }
+  socket.send(JSON.stringify(message));
+}
+
+function createRoom() {
+  connectSocket();
+  sendNetworkMessage({
+    type: "createRoom",
+    state: getNetworkState()
+  });
+  updateNetworkMessage("Creating room...");
+}
+
+function joinRoom(roomCode) {
+  connectSocket();
+  sendNetworkMessage({ type: "joinRoom", roomId: roomCode });
+  updateNetworkMessage(`Joining room ${roomCode}...`);
+}
+
+function leaveRoom() {
+  if (socket) {
+    socket.close();
+  }
+  isOnline = false;
+  roomId = null;
+  networkPlayerColor = null;
+  connectedPlayers = 0;
+  updateNetworkMessage("Left room.");
+  updateNetworkStatus();
+  render();
+}
+
+function getNetworkState() {
+  return {
+    board: copyBoard(board),
+    turn,
+    fullMoveNumber,
+    moveLog: [...moveLog],
+    gameOver,
+    gameStarted,
+    whiteTimeLeft,
+    blackTimeLeft,
+    activeTimerColor,
+    castlingRights: JSON.parse(JSON.stringify(castlingRights)),
+    enPassantTarget: enPassantTarget ? { ...enPassantTarget } : null
+  };
+}
+
+function applyNetworkState(state) {
+  if (!state) return;
+
+  board = state.board;
+  turn = state.turn;
+  fullMoveNumber = state.fullMoveNumber;
+  moveLog = state.moveLog || [];
+  gameOver = state.gameOver;
+  gameStarted = state.gameStarted;
+  whiteTimeLeft = state.whiteTimeLeft;
+  blackTimeLeft = state.blackTimeLeft;
+  activeTimerColor = state.activeTimerColor;
+  castlingRights = state.castlingRights || {
+    w: { kingSide: true, queenSide: true },
+    b: { kingSide: true, queenSide: true }
+  };
+  enPassantTarget = state.enPassantTarget || null;
+  selected = null;
+  legalMoves = [];
+  render();
+}
+
+function sendNetworkMove(fr, fc, tr, tc, moveData) {
+  if (!isOnline || !roomId) return;
+
+  sendNetworkMessage({
+    type: "move",
+    roomId,
+    from: { r: fr, c: fc },
+    to: { r: tr, c: tc },
+    moveData,
+    state: getNetworkState()
+  });
+
+  updateNetworkMessage("Move sent. Waiting for opponent...");
+}
+
+function handleNetworkMessage(msg) {
+  if (!msg || !msg.type) return;
+
+  switch (msg.type) {
+    case "roomCreated":
+      roomId = msg.roomId;
+      isOnline = true;
+      isRoomOwner = true;
+      networkPlayerColor = "w";
+      connectedPlayers = msg.players || 1;
+      updateNetworkStatus();
+      updateNetworkMessage(`Room ${roomId} created. Share the code with your opponent.`);
+      if (msg.state) applyNetworkState(msg.state);
+      break;
+
+    case "roomJoined":
+      roomId = msg.roomId;
+      isOnline = true;
+      isRoomOwner = false;
+      networkPlayerColor = "b";
+      connectedPlayers = msg.players || 2;
+      updateNetworkStatus();
+      updateNetworkMessage(`Joined room ${roomId}. You are Black.`);
+      if (msg.state) applyNetworkState(msg.state);
+      break;
+
+    case "roomUpdate":
+      roomId = msg.roomId || roomId;
+      isOnline = true;
+      connectedPlayers = msg.players || connectedPlayers;
+      updateNetworkStatus();
+      if (msg.state) applyNetworkState(msg.state);
+      if (msg.message) updateNetworkMessage(msg.message);
+      break;
+
+    case "error":
+      updateNetworkMessage(msg.message || "Network error occurred.");
+      break;
+
+    default:
+      console.warn("Unknown network message type:", msg.type);
+  }
+}
+
 /* =========================================================
    CHECK TOAST + END SCREEN
 ========================================================= */
@@ -2131,5 +2416,6 @@ window.startMatch = startMatch;
 
 setupThemeChanger();
 setupUltimateControls();
+setupNetworkControls();
 setupSuggestionToggle();
 newGame();
