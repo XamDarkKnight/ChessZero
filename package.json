@@ -1,15 +1,16 @@
 {
-  "name": "chess-zeo",
+  "name": "chesszero",
   "version": "1.0.0",
-  "description": "Multiplayer chess with WebSocket room sync for Azure deployment.",
+  "private": true,
+  "description": "Two-player online chess using Node.js and WebSockets.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": "20.x"
   },
   "dependencies": {
-    "ws": "^8.13.0"
+    "ws": "^8.18.0"
   }
 }
