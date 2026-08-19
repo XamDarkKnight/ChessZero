@@ -1,6 +1,9 @@
 {
-  "name": "Chess Zeo Dev Container",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:0-20",
+  "name": "Chess Zero Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
   "postCreateCommand": "npm install",
   "forwardPorts": [3000],
   "customizations": {
