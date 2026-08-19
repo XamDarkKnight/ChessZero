@@ -280,16 +280,48 @@ function isTimedMode() {
 ========================================================= */
 
 function newGame() {
-  if (isOnline && roomId && socket && socket.readyState === WebSocket.OPEN) {
-    sendNetworkMessage({
-      type: "resetRoom",
-      roomId,
-      state: getNetworkState()
-    });
-    updateNetworkMessage("Resetting online game...");
+  if (
+  isOnline &&
+  roomId &&
+  socket &&
+  socket.readyState === WebSocket.OPEN
+) {
+  if (!isRoomOwner) {
+    updateNetworkMessage(
+      "Only the room creator can start a new online game."
+    );
+
     return;
   }
 
+  stopTimerLoop();
+  clearRobotMoveTimeout();
+
+  initialTimeMs = getChosenTimeMs();
+  resetGameState(initialTimeMs);
+
+  gameMode = "friend";
+  gameStarted = true;
+  activeTimerColor = null;
+  flipped = networkPlayerColor === "b";
+
+  const overlay = document.getElementById("endOverlay");
+
+  if (overlay) {
+    overlay.style.display = "none";
+  }
+
+  sendNetworkMessage({
+    type: "resetRoom",
+    roomId,
+    state: getNetworkState()
+  });
+
+  updateNetworkMessage("Starting a new online game...");
+  render();
+
+  return;
+}
   stopTimerLoop();
   clearRobotMoveTimeout();
 
@@ -2298,27 +2330,47 @@ function handleNetworkMessage(msg) {
   if (!msg || !msg.type) return;
 
   switch (msg.type) {
-    case "roomCreated":
-      roomId = msg.roomId;
-      isOnline = true;
-      isRoomOwner = true;
-      networkPlayerColor = "w";
-      connectedPlayers = msg.players || 1;
-      updateNetworkStatus();
-      updateNetworkMessage(`Room ${roomId} created. Share the code with your opponent.`);
-      if (msg.state) applyNetworkState(msg.state);
-      break;
+  case "roomCreated":
+  roomId = msg.roomId;
+  isOnline = true;
+  isRoomOwner = true;
+  networkPlayerColor = "w";
+  connectedPlayers = msg.players || 1;
+  flipped = false;
+
+  updateNetworkStatus();
+  updateNetworkMessage(
+    `Room ${roomId} created. Share the code with your opponent.`
+  );
+
+  if (msg.state) {
+    applyNetworkState(msg.state);
+    flipped = false;
+    render();
+  }
+
+  break;
 
     case "roomJoined":
-      roomId = msg.roomId;
-      isOnline = true;
-      isRoomOwner = false;
-      networkPlayerColor = "b";
-      connectedPlayers = msg.players || 2;
-      updateNetworkStatus();
-      updateNetworkMessage(`Joined room ${roomId}. You are Black.`);
-      if (msg.state) applyNetworkState(msg.state);
-      break;
+  roomId = msg.roomId;
+  isOnline = true;
+  isRoomOwner = false;
+  networkPlayerColor = "b";
+  connectedPlayers = msg.players || 2;
+  flipped = true;
+
+  updateNetworkStatus();
+  updateNetworkMessage(
+    `Joined room ${roomId}. You are Black.`
+  );
+
+  if (msg.state) {
+    applyNetworkState(msg.state);
+    flipped = true;
+    render();
+  }
+
+  break;
 
     case "roomUpdate":
       roomId = msg.roomId || roomId;
