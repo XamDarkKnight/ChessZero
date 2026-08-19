@@ -36,7 +36,8 @@ let isOnline = false;
 let isRoomOwner = false;
 let connectedPlayers = 0;
 let pendingSocketActions = [];
-const DEFAULT_NETWORK_SERVER = "ws://localhost:3000";
+const DEFAULT_NETWORK_SERVER =
+  "wss://chesszero-server-f5hucjcug2crbbe2.southafricanorth-01.azurewebsites.net/ws";
 
 /* =========================================================
    ULTIMATE GAME MODE SETTINGS
