@@ -5,6 +5,15 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chesszero-server-production
+  cancel-in-progress: true
+
 jobs:
   build_and_deploy:
     name: Build and Deploy Node Server
@@ -14,17 +23,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v2
+      - name: Check server syntax
+        run: node --check server.js
+
+      - name: Check client syntax
+        run: node --check script.js
+
+      - name: Create deployment package
+        run: |
+          zip -r release.zip . \
+            -x ".git/*" \
+            -x ".github/*" \
+            -x ".devcontainer/*" \
+            -x "release.zip"
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
         with:
           app-name: chesszero-server
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
