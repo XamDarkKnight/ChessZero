@@ -46,11 +46,11 @@
   function create(handlers) {
     var net = {
       role: null, code: null,
-      peer: null, conn: null,
+      peer: null, conn: null, pendingConn: null,
       closed: false,
       status: "idle",
       lastSeen: 0, everConnected: false, directFails: 0,
-      hbTimer: null, retryTimer: null, attempts: 0
+      hbTimer: null, retryTimer: null, pendingTimer: null, attempts: 0
     };
 
     function setStatus(status, detail) {
@@ -61,6 +61,14 @@
     function clearTimers() {
       clearInterval(net.hbTimer); clearTimeout(net.retryTimer);
       net.hbTimer = null; net.retryTimer = null;
+    }
+
+    function clearPending(conn) {
+      if (conn && net.pendingConn !== conn) return false;
+      clearTimeout(net.pendingTimer);
+      net.pendingTimer = null;
+      net.pendingConn = null;
+      return true;
     }
 
     function startHeartbeat() {
@@ -83,6 +91,11 @@
     }
 
     function attach(conn) {
+      if (net.closed || (net.pendingConn && net.pendingConn !== conn)) {
+        try { conn.close(); } catch (e) { /* already closed */ }
+        return;
+      }
+      clearPending(conn);
       net.conn = conn;
       net.everConnected = true;
       net.lastSeen = Date.now();
@@ -131,14 +144,35 @@
       });
       peer.on("connection", function (conn) {
         if (net.conn && net.conn.open) {
-          conn.on("open", function () {
+          function rejectFullConnection() {
             try { conn.send({ t: "full" }); } catch (e) { /* ignore */ }
             setTimeout(function () { try { conn.close(); } catch (e) { /* ignore */ } }, 400);
-          });
+          }
+          if (conn.open) rejectFullConnection(); else conn.on("open", rejectFullConnection);
           return;
         }
+        if (net.pendingConn) {
+          try { conn.close(); } catch (e) { /* already closed */ }
+          return;
+        }
+        if (net.conn) dropConnection();
+        net.pendingConn = conn;
+        net.pendingTimer = setTimeout(function () {
+          if (net.pendingConn !== conn) return;
+          clearPending(conn);
+          try { conn.close(); } catch (e) { /* already closed */ }
+        }, 12000);
+        conn.on("close", function () { clearPending(conn); });
+        conn.on("error", function () { clearPending(conn); });
+        function onConnectionOpen() {
+          if (net.closed || net.peer !== peer || net.pendingConn !== conn) {
+            try { conn.close(); } catch (e) { /* already closed */ }
+            return;
+          }
+          attach(conn);
+        }
         // Wait for the data channel to open before announcing "connected".
-        if (conn.open) attach(conn); else conn.on("open", function () { attach(conn); });
+        if (conn.open) onConnectionOpen(); else conn.on("open", onConnectionOpen);
       });
       peer.on("disconnected", function () {
         if (!net.closed && net.peer === peer) { try { peer.reconnect(); } catch (e) { /* will be retried on error */ } }
@@ -191,11 +225,16 @@
 
     function connectToHost() {
       if (net.closed || (net.conn && net.conn.open)) return;
+      if (net.pendingConn) return;
       if (!net.peer || net.peer.destroyed || net.peer.disconnected) { scheduleGuestRetry(2500); return; }
+      clearTimeout(net.retryTimer);
+      net.retryTimer = null;
       if (net.status !== "away") setStatus("connecting");
       var conn = net.peer.connect(PREFIX + net.code, { reliable: true });
+      net.pendingConn = conn;
       var gaveUp = setTimeout(function () {
-        if (!conn.open && !net.closed) {
+        if (net.pendingConn === conn && !net.closed) {
+          clearPending(conn);
           try { conn.close(); } catch (e) { /* ignore */ }
           if (!net.everConnected && ++net.directFails >= 2) {
             setStatus("error", "Found the game, but the two browsers couldn't connect directly. Your network (or your friend's) may block this. Try a different network, such as a phone hotspot, or turn off any VPN. Still retrying…");
@@ -203,7 +242,26 @@
           scheduleGuestRetry(1500);
         }
       }, 12000);
-      conn.on("open", function () { clearTimeout(gaveUp); net.attempts = 0; attach(conn); });
+      net.pendingTimer = gaveUp;
+      conn.on("open", function () {
+        if (net.closed || net.pendingConn !== conn) {
+          try { conn.close(); } catch (e) { /* already closed */ }
+          return;
+        }
+        clearPending(conn);
+        net.attempts = 0;
+        attach(conn);
+      });
+      conn.on("close", function () {
+        if (net.pendingConn !== conn) return;
+        clearPending(conn);
+        scheduleGuestRetry(1500);
+      });
+      conn.on("error", function () {
+        if (net.pendingConn !== conn) return;
+        clearPending(conn);
+        scheduleGuestRetry(1500);
+      });
     }
 
     /* ---------- shared ---------- */
@@ -218,9 +276,13 @@
     function closeAll(keepStatus) {
       net.closed = true;
       clearTimers();
-      var c = net.conn, p = net.peer;
+      clearTimeout(net.pendingTimer);
+      net.pendingTimer = null;
+      var c = net.conn, pending = net.pendingConn, p = net.peer;
       net.conn = null; net.peer = null;
+      net.pendingConn = null;
       if (c) { try { c.close(); } catch (e) { /* ignore */ } }
+      if (pending && pending !== c) { try { pending.close(); } catch (e) { /* ignore */ } }
       if (p) { try { p.destroy(); } catch (e) { /* ignore */ } }
       if (!keepStatus) net.status = "idle";
     }
