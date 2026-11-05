@@ -58,7 +58,8 @@
           </label>
         </div>
         <button class="btn primary wide" id="btnCreate" type="button">Create game &amp; get link</button>
-        <p class="note">You get a link to send your friend. When they open it, the game starts. No sign-up for either of you.</p>
+        <p class="note">You get a link to send your friend. <b>It stays the same every time</b>, so you can keep it in your chat or bookmark it. No sign-up for either of you.</p>
+        <button class="btn ghost wide" id="btnNewLink" type="button" hidden>Use a brand new link instead</button>
       </div>
 
       <div id="onlineLive" hidden>
@@ -124,6 +125,17 @@
       <button class="btn danger" id="btnResign" type="button">Resign</button>
     </div>
 
+    <div class="stickers" id="stickers" hidden aria-label="Send your friend a reaction">
+      <button type="button" data-e="😂" aria-label="Laugh">😂</button>
+      <button type="button" data-e="💀" aria-label="Skull">💀</button>
+      <button type="button" data-e="🤡" aria-label="Clown">🤡</button>
+      <button type="button" data-e="😭" aria-label="Crying">😭</button>
+      <button type="button" data-e="🔥" aria-label="Fire">🔥</button>
+      <button type="button" data-e="🗿" aria-label="Moai">🗿</button>
+      <button type="button" data-e="😈" aria-label="Devil">😈</button>
+      <button type="button" data-e="🫡" aria-label="Salute">🫡</button>
+    </div>
+
     <h2 class="label">Moves</h2>
     <div class="moves" id="moves" tabindex="0" aria-label="Move list"></div>
 
@@ -150,6 +162,12 @@
     </details>
   </aside>
 </main>
+
+<div id="reaction" class="reaction" hidden aria-hidden="true">
+  <div id="rain"></div>
+  <div class="r-face" id="rFace"></div>
+  <div class="r-text" id="rText"></div>
+</div>
 
 <div id="checkToast" class="check-toast" aria-hidden="true">CHECK!</div>
 

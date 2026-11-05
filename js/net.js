@@ -49,7 +49,7 @@
       peer: null, conn: null,
       closed: false,
       status: "idle",
-      lastSeen: 0, everConnected: false,
+      lastSeen: 0, everConnected: false, directFails: 0,
       hbTimer: null, retryTimer: null, attempts: 0
     };
 
@@ -103,6 +103,15 @@
       if (handlers.onOpen) handlers.onOpen(conn);
     }
 
+    // If the matchmaking server never answers, say so instead of showing "Connecting" forever.
+    function watchSignaling(peer) {
+      setTimeout(function () {
+        if (!net.closed && net.peer === peer && !peer.open && net.status !== "error") {
+          setStatus("error", "Can't reach the matchmaking server (0.peerjs.com). It may be down, or your network or an ad/privacy blocker is blocking it. Try again in a few minutes, or on a different network.");
+        }
+      }, 15000);
+    }
+
     /* ---------- host ---------- */
 
     net.host = function (code) {
@@ -115,6 +124,7 @@
       if (net.closed) return;
       var peer = new root.Peer(PREFIX + net.code, peerOptions());
       net.peer = peer;
+      watchSignaling(peer);
       peer.on("open", function () {
         net.attempts = 0;
         if (!net.conn) setStatus("waiting");
@@ -154,6 +164,7 @@
       setStatus("connecting");
       var peer = new root.Peer(undefined, peerOptions());
       net.peer = peer;
+      watchSignaling(peer);
       peer.on("open", function () { connectToHost(); });
       peer.on("disconnected", function () {
         if (!net.closed && net.peer === peer) { try { peer.reconnect(); } catch (e) { /* ignore */ } }
@@ -184,7 +195,13 @@
       if (net.status !== "away") setStatus("connecting");
       var conn = net.peer.connect(PREFIX + net.code, { reliable: true });
       var gaveUp = setTimeout(function () {
-        if (!conn.open && !net.closed) { try { conn.close(); } catch (e) { /* ignore */ } scheduleGuestRetry(1500); }
+        if (!conn.open && !net.closed) {
+          try { conn.close(); } catch (e) { /* ignore */ }
+          if (!net.everConnected && ++net.directFails >= 2) {
+            setStatus("error", "Found the game, but the two browsers couldn't connect directly. Your network (or your friend's) may block this. Try a different network, such as a phone hotspot, or turn off any VPN. Still retrying…");
+          }
+          scheduleGuestRetry(1500);
+        }
       }, 12000);
       conn.on("open", function () { clearTimeout(gaveUp); net.attempts = 0; attach(conn); });
     }

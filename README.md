@@ -20,6 +20,10 @@ You need this once, so your friend has a link to open.
 6. After a minute or two the address appears at the top of that Pages screen. It looks like `https://YOUR-USERNAME.github.io/chess/`.
 7. Open it, stay on the **Online** tab, choose your colour and clock, and click **Create game & get link**. Send the link to your friend. When they open it, the game starts.
 
+**The link never changes.** It is saved in your browser, so every time you click Create game you get the same link. Send it to your friend once and keep it in your chat. Whenever you open the page and click Create game, the same link works again. (Use "Use a brand new link instead" if you ever want a fresh one. Anyone with the link can join while you are waiting, so only share it with people you trust.)
+
+**Reactions:** when a queen is captured, both players see a big face, a caption and falling emojis. Online, the row of sticker buttons under the controls sends a reaction to your friend's screen.
+
 Any static host works too (Netlify, Cloudflare Pages, Vercel). Just upload the same files.
 
 Opening `index.html` straight from your computer works for Pass & play and Vs bot. Online play needs the hosted version, because the link has to be a web address your friend can open.

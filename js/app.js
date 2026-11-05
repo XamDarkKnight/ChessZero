@@ -161,6 +161,7 @@
     }
     if (G.online) { G.online.offerIn = false; G.online.offerOut = false; }
 
+    if (m.cap && m.cap[1] === "Q" && source !== "replay") queenReaction(mover);
     var res = detectResult(mover);
     if (res) finish(res, source === "replay");
     else if (source !== "replay" && G.pos.inCheck(G.pos.turn)) showCheckToast();
@@ -334,7 +335,9 @@
   function createOnlineGame() {
     var choice = $("selColorOnline").value;
     var color = choice === "random" ? (Math.random() < 0.5 ? "w" : "b") : choice;
-    startOnline({ role: "host", code: Net.makeCode(6), myColor: color, clockMs: readClock("selClockOnline") });
+    var code = store("room");
+    if (!code || !/^[a-z0-9]{4,12}$/.test(code)) { code = Net.makeCode(8); store("room", code); } // same link every time
+    startOnline({ role: "host", code: code, myColor: color, clockMs: readClock("selClockOnline") });
   }
 
   function onNetStatus(status, detail) {
@@ -433,6 +436,9 @@
         o.started = true; o.rematchMine = o.rematchTheirs = false; o.offerIn = o.offerOut = false;
         renderAll();
         break;
+      case "react":
+        if (STICKERS.indexOf(msg.e) >= 0) showReaction(msg.e, "");
+        break;
       case "bye":
         o.friendLeft = true; notify("Your friend left the game."); renderAll();
         break;
@@ -497,6 +503,53 @@
     if (!replayMoves(s.moves || [])) { notify("The saved game couldn't be restored."); clearHostSession(); return; }
     if (G.clockMs) { G.clock.w = s.w; G.clock.b = s.b; G.clock.active = null; }
     renderAll();
+  }
+
+  /* ---------- reactions ---------- */
+
+  var QUEEN_WIN = [["\uD83D\uDE08", "QUEEN DOWN!"], ["\uD83E\uDD21", "WHERE'S YOUR QUEEN?"], ["\uD83D\uDC80", "RIP QUEEN"],
+                   ["\uD83D\uDE0E", "THANKS FOR THE QUEEN"], ["\uD83D\uDDFF", "NO QUEEN, NO PROBLEM"], ["\uD83D\uDD25", "QUEEN SLAIN"]];
+  var QUEEN_LOSE = [["\uD83D\uDE2D", "MY QUEEN!!"], ["\uD83E\uDD2F", "HOW DID I MISS THAT?!"], ["\uD83D\uDC80", "QUEEN GONE"],
+                    ["\uD83E\uDEE0", "WELL, THAT HURT"], ["\uD83D\uDE24", "REVENGE TIME"], ["\uD83E\uDD72", "IT'S FINE. I'M FINE."]];
+  var QUEEN_NEUTRAL = [["\uD83D\uDC80", "QUEEN DOWN!"], ["\uD83D\uDE31", "NOT THE QUEEN!"], ["\uD83E\uDD21", "OOPS, QUEEN GONE"], ["\uD83D\uDD25", "QUEEN SLAIN"]];
+  var STICKERS = ["\uD83D\uDE02", "\uD83D\uDC80", "\uD83E\uDD21", "\uD83D\uDE2D", "\uD83D\uDD25", "\uD83D\uDDFF", "\uD83D\uDE08", "\uD83E\uDEE1"];
+  var reactTimer = null, lastSticker = 0;
+
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+
+  function showReaction(face, text) {
+    var box = $("reaction"), rain = $("rain");
+    rain.textContent = "";
+    for (var i = 0; i < 16; i++) {
+      var d = el("span", "rain-item", face);
+      d.style.left = Math.random() * 96 + "%";
+      d.style.fontSize = 28 + Math.random() * 36 + "px";
+      d.style.animationDuration = 1.6 + Math.random() * 1.4 + "s";
+      d.style.animationDelay = Math.random() * 0.6 + "s";
+      rain.appendChild(d);
+    }
+    $("rFace").textContent = face;
+    $("rText").textContent = text || "";
+    box.hidden = false;
+    // restart the CSS animations
+    var f = $("rFace"), t = $("rText");
+    f.style.animation = "none"; t.style.animation = "none"; void f.offsetWidth; f.style.animation = ""; t.style.animation = "";
+    clearTimeout(reactTimer);
+    reactTimer = setTimeout(function () { box.hidden = true; rain.textContent = ""; }, 3000);
+  }
+
+  function queenReaction(capturer) {
+    var set = G.mode === "local" ? QUEEN_NEUTRAL : (capturer === G.myColor ? QUEEN_WIN : QUEEN_LOSE);
+    var r = pick(set);
+    showReaction(r[0], r[1]);
+    var b = $("board");
+    b.classList.remove("shake"); void b.offsetWidth; b.classList.add("shake");
+  }
+
+  function sendSticker(e) {
+    if (Date.now() - lastSticker < 1200 || STICKERS.indexOf(e) < 0) return;
+    lastSticker = Date.now();
+    if (sendNet({ t: "react", e: e })) showReaction(e, "");
   }
 
   /* ---------- dialogs and overlays ---------- */
@@ -705,6 +758,8 @@
     $("btnDraw").disabled = !(o && o.started && o.connected && inProgress && !o.offerOut && G.played.length > 0);
     $("btnResign").hidden = m === "local";
     $("btnResign").disabled = m === "bot" ? !inProgress : !(o && o.started && inProgress);
+    $("stickers").hidden = !(m === "online" && o && o.started);
+    $("btnNewLink").hidden = !store("room");
     $("btnHints").textContent = "Hints: " + (G.hints ? "on" : "off");
     $("btnHints").classList.toggle("on", G.hints);
     var bot = AI.getBot($("selBot").value);
@@ -884,6 +939,10 @@
     });
     $("btnCreate").addEventListener("click", createOnlineGame);
     $("btnCopy").addEventListener("click", copyLink);
+    $("btnNewLink").addEventListener("click", function () { store("room", null); renderAll(); notify("Done. Your next game gets a brand new link."); });
+    Array.prototype.forEach.call(document.querySelectorAll("#stickers button"), function (b) {
+      b.addEventListener("click", function () { sendSticker(b.dataset.e); });
+    });
     $("linkInput").addEventListener("focus", function () { this.select(); });
     $("btnLeave").addEventListener("click", leaveClicked);
     $("btnStartLocal").addEventListener("click", function () {
