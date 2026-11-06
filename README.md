@@ -40,6 +40,20 @@ This uses no server at all, so it works even when the matchmaking server is down
 
 **Test my connection** (in the same section) checks the game library, the matchmaking server and your network, and says which one is the problem.
 
+## Relay (fixes "won't connect" on the same Wi-Fi)
+
+If **Test my connection** shows no `relay` in "Address types found", and two computers on the same Wi-Fi won't connect, your router is blocking them from reaching each other. A relay server carries the game around that block. The free public relays built into the game may be down, so you can add your own free one:
+
+1. Sign up for a free account at metered.ca and create a TURN server app. The free plan is plenty for chess, which sends tiny messages.
+2. In the dashboard, find the TURN credentials API address. It looks like
+   `https://YOUR-APP-NAME.metered.live/api/v1/turn/credentials?apiKey=YOUR_API_KEY`
+3. Open `js/config.js` in your GitHub repo (click the pencil icon to edit) and paste it between the quotes:
+   `window.CHESS_TURN_API_URL = "https://...";`
+   Then click **Commit changes**.
+4. Wait a minute, refresh the game with Ctrl+F5, and run **Test my connection** again. You want to see `OK Relay key works` and `relay` in the address types.
+
+The key is visible to anyone who looks at your repo. The worst someone can do with it is use up your free relay allowance, and you can delete and regenerate it in the metered.ca dashboard.
+
 ## How online play works
 
 - You click **Create game**. Your browser registers a short game code with the free public [PeerJS](https://peerjs.com) matchmaking server.
@@ -76,6 +90,7 @@ node tests/ai.js      # bots find mates, win material, and stay within their tim
 | `index.html`, `css/style.css` | Page and styling |
 | `js/engine.js` | Chess rules (no screen code, so it is testable) |
 | `js/ai.js` | The bots |
-| `js/net.js` | Online connection (wraps PeerJS) |
+| `js/net.js` | Online connection (wraps PeerJS) and Direct mode |
+| `js/config.js` | Optional relay setting (see Relay) |
 | `js/app.js` | Board, clocks, modes and online game logic |
 | `vendor/peerjs.min.js` | PeerJS 1.5.5 (MIT licence, see `vendor/PEERJS-LICENSE.txt`) |

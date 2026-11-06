@@ -37,10 +37,28 @@
     return typeof root.Peer === "function" && !!root.RTCPeerConnection;
   }
 
+  /* Relay ("TURN") servers carry the game when the two browsers can't reach each other directly,
+   * for example two computers on the same Wi-Fi whose router blocks them from talking.
+   * js/config.js can set CHESS_TURN_API_URL to fetch working relay credentials (see README). */
+  var relayIce = [], relayLoad = null, relayInfo = "none";
+  function loadRelay() {
+    if (relayLoad) return relayLoad;
+    var url = root.CHESS_TURN_API_URL;
+    if (!url || !root.fetch) { relayLoad = Promise.resolve(); return relayLoad; }
+    relayLoad = Promise.race([
+      root.fetch(url).then(function (r) { return r.ok ? r.json() : null; }).then(function (list) {
+        if (Array.isArray(list) && list.length) { relayIce = list; relayInfo = "ok"; } else relayInfo = "bad";
+      }).catch(function () { relayInfo = "bad"; }),
+      new Promise(function (res) { setTimeout(function () { if (relayInfo === "none") relayInfo = "slow"; res(); }, 5000); })
+    ]);
+    return relayLoad;
+  }
+  function allIce() { return relayIce.concat(DEFAULT_ICE); }
+
   // Tests can set window.CHESS_PEER_CONFIG to point at a private matchmaking server. Normal play leaves it unset.
   function peerOptions() {
     var o = root.CHESS_PEER_CONFIG;
-    return o ? JSON.parse(JSON.stringify(o)) : {};
+    return o ? JSON.parse(JSON.stringify(o)) : { config: { iceServers: allIce() } };
   }
 
   function create(handlers) {
@@ -117,7 +135,7 @@
     net.host = function (code) {
       net.role = "host"; net.code = code; net.closed = false; net.attempts = 0;
       setStatus("connecting");
-      openHostPeer();
+      loadRelay().then(openHostPeer);
     };
 
     function openHostPeer() {
@@ -162,6 +180,10 @@
     net.join = function (code) {
       net.role = "guest"; net.code = code; net.closed = false; net.attempts = 0;
       setStatus("connecting");
+      loadRelay().then(function () { if (!net.closed) startGuestPeer(); });
+    };
+
+    function startGuestPeer() {
       var peer = new root.Peer(undefined, peerOptions());
       net.peer = peer;
       watchSignaling(peer);
@@ -238,12 +260,14 @@
    * On the same Wi-Fi this needs nothing from the internet. */
   var DEFAULT_ICE = [
     { urls: "stun:stun.l.google.com:19302" },
-    { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" }
+    { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" },
+    { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"],
+      username: "openrelayproject", credential: "openrelayproject" } // free public relay; may or may not be up
   ];
 
   function iceConfig() {
     var c = root.CHESS_PEER_CONFIG && root.CHESS_PEER_CONFIG.config;
-    return c || { iceServers: DEFAULT_ICE };
+    return c || { iceServers: allIce() };
   }
 
   function createManual(handlers) {
@@ -294,10 +318,13 @@
     // Host: resolves with the code to send to the friend.
     net.host = function () {
       net.role = "host";
-      var pc = net.pc = new root.RTCPeerConnection(iceConfig());
-      watch(pc);
-      wire(pc.createDataChannel("chess"));
-      return pc.createOffer().then(function (o) { return pc.setLocalDescription(o); })
+      var pc;
+      return loadRelay().then(function () {
+        pc = net.pc = new root.RTCPeerConnection(iceConfig());
+        watch(pc);
+        wire(pc.createDataChannel("chess"));
+        return pc.createOffer();
+      }).then(function (o) { return pc.setLocalDescription(o); })
         .then(function () { return gathered(pc); })
         .then(function () { setStatus("waiting"); return encode(pc.localDescription); });
     };
@@ -312,10 +339,13 @@
       net.role = "guest";
       var d = decode(text, "offer");
       if (!d) return Promise.reject(new Error("That isn't a game code. Paste the whole code your friend sent you."));
-      var pc = net.pc = new root.RTCPeerConnection(iceConfig());
-      watch(pc);
-      pc.ondatachannel = function (e) { wire(e.channel); };
-      return pc.setRemoteDescription(d).then(function () { return pc.createAnswer(); })
+      var pc;
+      return loadRelay().then(function () {
+        pc = net.pc = new root.RTCPeerConnection(iceConfig());
+        watch(pc);
+        pc.ondatachannel = function (e) { wire(e.channel); };
+        return pc.setRemoteDescription(d);
+      }).then(function () { return pc.createAnswer(); })
         .then(function (a) { return pc.setLocalDescription(a); })
         .then(function () { return gathered(pc); })
         .then(function () { setStatus("waiting"); return encode(pc.localDescription); });
@@ -350,10 +380,16 @@
       ws.onerror = function () { end("FAIL  Matchmaking server (0.peerjs.com) is down or blocked on this network (try turning off ad blockers or a VPN)."); };
     });
 
-    var ice = new Promise(function (resolve) {
+    var ice = loadRelay().then(function () { return new Promise(function (resolve) {
       if (!root.RTCPeerConnection) return resolve();
-      var types = {}, pc = new root.RTCPeerConnection({ iceServers: DEFAULT_ICE });
+      if (relayInfo === "none") log("INFO  No relay key set in js/config.js (see README, \"Relay\").");
+      else if (relayInfo === "ok") log("OK    Relay key works (" + relayIce.length + " relay servers loaded)");
+      else log("FAIL  The relay key in js/config.js didn't work. Check the address you pasted.");
+      var types = {}, pc = new root.RTCPeerConnection({ iceServers: allIce() });
+      var finished = false;
       var finish = function () {
+        if (finished) return;
+        finished = true;
         try { pc.close(); } catch (e) { /* ignore */ }
         var found = Object.keys(types);
         if (!found.length) log("FAIL  No network addresses found at all. Something is blocking WebRTC in this browser.");
@@ -361,6 +397,8 @@
           log("INFO  Address types found: " + found.join(", "));
           if (types.srflx || types.relay) log("OK    This network can reach the internet for direct connections");
           else log("WARN  Only local addresses found. Online play over the internet will likely fail here, but Direct mode on the same Wi-Fi can still work.");
+          if (types.relay) log("OK    Relay reachable: games can connect even if your Wi-Fi blocks devices from seeing each other");
+          else log("WARN  No relay reachable. If both computers are on the same Wi-Fi and won't connect, set up a relay key (README, \"Relay\").");
         }
         resolve();
       };
@@ -371,7 +409,7 @@
       pc.createDataChannel("t");
       pc.createOffer().then(function (o) { return pc.setLocalDescription(o); });
       setTimeout(finish, 6000);
-    });
+    }); });
     return Promise.all([server, ice]);
   }
 
