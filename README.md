@@ -40,6 +40,17 @@ This uses no server at all, so it works even when the matchmaking server is down
 
 **Test my connection** (in the same section) checks the game library, the matchmaking server and your network, and says which one is the problem.
 
+## Metered (works even on networks that block everything else)
+
+Some networks, such as company networks, block every way two browsers can connect to each other, including relays. Ordinary secure websites still work there, so the game can send its moves through Metered's messaging server instead. Chess sends only a few small messages a minute.
+
+1. At metered.ca, open **Realtime Messaging**, then **Keys**, then **Create key**. Choose type **Publishable**, with **Subscribe** and **Publish** switched on.
+2. Copy the key. It starts with `pk_live_`.
+3. Open `js/config.js` in your repo, click the pencil icon, and paste the key between the quotes on the line `window.CHESS_REALTIME_KEY = "";`. Commit.
+4. Wait a minute, press Ctrl+F5, and run **Test my connection**. You want `OK Metered messaging works`.
+
+With this key set, online games always go through Metered. Your link, refreshes, rematches, draw offers and stickers all work the same way. The key is visible in your public repo; the worst someone can do is use up your free allowance, and you can delete it and make a new one in the dashboard.
+
 ## Relay (fixes "won't connect" on the same Wi-Fi)
 
 If **Test my connection** shows no `relay` in "Address types found", and two computers on the same Wi-Fi won't connect, your router is blocking them from reaching each other. A relay server carries the game around that block. The free public relays built into the game may be down, so you can add your own free one:
@@ -94,3 +105,4 @@ node tests/ai.js      # bots find mates, win material, and stay within their tim
 | `js/config.js` | Optional relay setting (see Relay) |
 | `js/app.js` | Board, clocks, modes and online game logic |
 | `vendor/peerjs.min.js` | PeerJS 1.5.5 (MIT licence, see `vendor/PEERJS-LICENSE.txt`) |
+| `vendor/metered-realtime.min.js` | Metered Realtime SDK 1.2.1 (MIT licence, see `vendor/METERED-REALTIME-LICENSE.txt`) |

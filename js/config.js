@@ -12,3 +12,9 @@ window.CHESS_TURN_API_URL = "https://chesszero.metered.live/api/v1/turn/credenti
 window.CHESS_ICE_SERVERS = [
 
 ];
+
+// Metered messaging key (works even on networks that block everything else).
+// In metered.ca: Realtime Messaging -> Keys -> Create key -> type "Publishable",
+// with Subscribe and Publish switched on. Paste the "pk_live_..." value between the quotes.
+// When this is set, online games send moves through Metered's server instead of connecting the browsers directly.
+window.CHESS_REALTIME_KEY = "";

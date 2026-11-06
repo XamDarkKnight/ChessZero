@@ -58,7 +58,11 @@
     var list = root.CHESS_ICE_SERVERS;
     return Array.isArray(list) ? list.filter(function (x) { return x && x.urls; }) : [];
   }
-  function allIce() { return relayIce.concat(pastedIce(), DEFAULT_ICE); }
+  function allIce() {
+    var own = relayIce.concat(pastedIce());
+    // With your own relay set up, skip the free public relays: they are often down and only slow the connection.
+    return own.length ? own.concat([DEFAULT_ICE[0]]) : DEFAULT_ICE;
+  }
 
   // Tests can set window.CHESS_PEER_CONFIG to point at a private matchmaking server. Normal play leaves it unset.
   function peerOptions() {
@@ -225,7 +229,7 @@
         if (!conn.open && !net.closed) {
           try { conn.close(); } catch (e) { /* ignore */ }
           if (!net.everConnected && ++net.directFails >= 2) {
-            setStatus("error", "Found the game, but the two browsers couldn't connect directly. Your network (or your friend's) may block this. Try a different network, such as a phone hotspot, or turn off any VPN. Still retrying…");
+            setStatus("error", "Found the game, but the two browsers couldn't connect. Your network may block this. Try a phone hotspot, or set up the Metered messaging key (README, \"Metered\").");
           }
           scheduleGuestRetry(1500);
         }
@@ -375,6 +379,19 @@
     log(root.Peer ? "OK    Game library loaded" : "FAIL  Game library did not load. Re-upload the vendor folder to GitHub.");
     log(root.RTCPeerConnection ? "OK    This browser supports direct connections" : "FAIL  This browser can't do direct connections. Try Chrome, Edge, Firefox or Safari.");
 
+    var metered = new Promise(function (resolve) {
+      if (!root.CHESS_REALTIME_KEY) { log("INFO  No Metered messaging key set (optional, see README \"Metered\")."); return resolve(); }
+      if (!root.MeteredPeer || !root.MeteredPeer.SignallingClient) { log("FAIL  Metered library did not load. Re-upload the vendor folder."); return resolve(); }
+      var done = false, client;
+      var end = function (line) { if (done) return; done = true; log(line); try { client.close(); } catch (e) { /* ignore */ } resolve(); };
+      try { client = new root.MeteredPeer.SignallingClient({ apiKey: root.CHESS_REALTIME_KEY, reconnect: false }); }
+      catch (e) { return end("FAIL  Metered messaging key looks wrong: " + e.message); }
+      setTimeout(function () { end("FAIL  Metered messaging server didn't answer in 10 seconds."); }, 10000);
+      client.connect().then(function () { return client.subscribe("wmchess-diag-" + makeCode(6)); })
+        .then(function () { end("OK    Metered messaging works: online games will send moves through Metered"); },
+              function (e) { end("FAIL  Metered messaging refused: " + ((e && (e.code || e.message)) || "unknown") + ". Check the key and that it allows Subscribe and Publish."); });
+    });
+
     var server = new Promise(function (resolve) {
       var ws, done = false;
       function end(line) { if (!done) { done = true; clearTimeout(t); log(line); try { ws.close(); } catch (e) { /* ignore */ } resolve(); } }
@@ -404,7 +421,7 @@
           if (types.srflx || types.relay) log("OK    This network can reach the internet for direct connections");
           else log("WARN  Only local addresses found. Online play over the internet will likely fail here, but Direct mode on the same Wi-Fi can still work.");
           if (types.relay) log("OK    Relay reachable: games can connect even if your Wi-Fi blocks devices from seeing each other");
-          else log("WARN  No relay reachable. If both computers are on the same Wi-Fi and won't connect, set up a relay key (README, \"Relay\").");
+          else log("WARN  No relay reachable. If the two computers won't connect, set up the Metered messaging key (README, \"Metered\").");
         }
         resolve();
       };
@@ -416,9 +433,175 @@
       pc.createOffer().then(function (o) { return pc.setLocalDescription(o); });
       setTimeout(finish, 6000);
     }); });
-    return Promise.all([server, ice]);
+    // Try each of your own relay servers on its own, so we can see which connection types this network allows.
+    var perRelay = ice.then(function () {
+      var list = [];
+      relayIce.concat(pastedIce()).forEach(function (srv) {
+        [].concat(srv.urls).forEach(function (u) {
+          if (/^turns?:/.test(u)) list.push({ urls: u, username: srv.username, credential: srv.credential });
+        });
+      });
+      if (!list.length || !root.RTCPeerConnection) return;
+      log("INFO  Testing each relay route (up to 12 seconds)…");
+      return Promise.all(list.map(function (srv) {
+        return new Promise(function (resolve) {
+          var got = false, ended = false, pc;
+          var label = srv.urls.replace(/^(turns?):([^?]+)(\?transport=(\w+))?$/, function (m, scheme, host, q, tr) {
+            return (scheme === "turns" ? "secure " : "") + (tr || "udp").toUpperCase() + " port " + host.split(":")[1];
+          });
+          function done() {
+            if (ended) return; ended = true;
+            try { pc.close(); } catch (e) { /* ignore */ }
+            log((got ? "OK    Relay route works: " : "FAIL  Relay route blocked: ") + label);
+            resolve();
+          }
+          try { pc = new root.RTCPeerConnection({ iceServers: [srv], iceTransportPolicy: "relay" }); }
+          catch (e) { log("FAIL  Relay route not usable: " + label); return resolve(); }
+          pc.onicecandidate = function (e) {
+            if (e.candidate && / typ relay/.test(e.candidate.candidate)) { got = true; done(); }
+            else if (!e.candidate) done();
+          };
+          pc.createDataChannel("t");
+          pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(done);
+          setTimeout(done, 12000);
+        });
+      }));
+    });
+    return Promise.all([metered, server, ice, perRelay]);
   }
 
-  var api = { create: create, createManual: createManual, diagnose: diagnose, makeCode: makeCode, cleanCode: cleanCode, supported: supported };
+  /* ---------- via Metered: moves travel through Metered's messaging server ----------
+   * Used when js/config.js has CHESS_REALTIME_KEY (a "pk_live_..." publishable key).
+   * Works on networks that block every browser-to-browser route, because it is an ordinary
+   * secure web connection (wss://rms.metered.ca). Both players join one channel per game code. */
+  function meteredAvailable() {
+    return !!(root.CHESS_REALTIME_KEY && root.MeteredPeer && root.MeteredPeer.SignallingClient);
+  }
+
+  // One id per browser tab that survives a refresh, so a reloading player is recognised and let straight back in.
+  function tabId() {
+    try {
+      var id = sessionStorage.getItem("wmchess.tab");
+      if (!id) { id = makeCode(12); sessionStorage.setItem("wmchess.tab", id); }
+      return id;
+    } catch (e) { return makeCode(12); }
+  }
+
+  function createMetered(handlers) {
+    var net = { metered: true, role: null, code: null, client: null, closed: false, status: "idle",
+                sid: tabId(), friend: null, friendSeen: 0, open: false, hbTimer: null, joinTimer: null };
+    var HB_MS = 8000, SILENCE_MS = 30000;
+    var channel = function () { return "wmchess-" + net.code; };
+
+    function setStatus(status, detail) {
+      net.status = status;
+      if (handlers.onStatus) handlers.onStatus(status, detail || "");
+    }
+    function post(env) {
+      if (!net.client || net.closed) return false;
+      env.s = net.sid;
+      net.client.publish(channel(), env).catch(function () { /* reconnect logic handles drops */ });
+      return true;
+    }
+    function becomeOpen(friendSid) {
+      net.friend = friendSid; net.friendSeen = Date.now();
+      if (net.open) return;
+      net.open = true;
+      clearInterval(net.joinTimer); net.joinTimer = null;
+      setStatus("connected");
+      if (handlers.onOpen) handlers.onOpen();
+    }
+    function lose() {
+      if (!net.open) return;
+      net.open = false;
+      if (!net.closed) {
+        setStatus("away");
+        if (net.role === "guest") startJoining();
+      }
+    }
+    function startJoining() {
+      clearInterval(net.joinTimer);
+      var ask = function () { if (!net.open) post({ k: "join" }); };
+      ask();
+      net.joinTimer = setInterval(ask, 3000);
+    }
+    function onEnvelope(env) {
+      if (!env || typeof env !== "object" || env.s === net.sid) return;   // ignore our own messages
+      if (env.to && env.to !== net.sid) return;                            // meant for someone else
+      if (net.role === "host") {
+        if (env.k === "join") {
+          var busy = net.open && net.friend !== env.s && Date.now() - net.friendSeen < SILENCE_MS;
+          if (busy) { post({ k: "full", to: env.s }); return; }
+          if (net.open && net.friend !== env.s) { net.open = false; }       // old friend went silent: new session takes over
+          post({ k: "ok", to: env.s });
+          becomeOpen(env.s);
+          return;
+        }
+        if (env.s !== net.friend) return;
+      } else {
+        // "ok" while already connected means the host restarted: say hello again so it resends the game.
+        if (env.k === "ok") { var already = net.open; becomeOpen(env.s); if (already && handlers.onOpen) handlers.onOpen(); return; }
+        if (env.k === "host-here") { post({ k: "join" }); return; }   // host (re)connected, for example after a refresh
+        if (env.k === "full" && !net.open) { setStatus("full"); return; }
+        if (env.s !== net.friend) return;
+      }
+      net.friendSeen = Date.now();
+      if (env.k === "msg" && net.open && handlers.onMessage) handlers.onMessage(env.m);
+    }
+
+    function start(role, code) {
+      net.role = role; net.code = code; net.closed = false;
+      setStatus("connecting");
+      var client = net.client = new root.MeteredPeer.SignallingClient({
+        apiKey: root.CHESS_REALTIME_KEY,
+        reconnect: { maxAttempts: Infinity }
+      });
+      client.on("message", function (ev) { if (ev && ev.channel === channel()) onEnvelope(ev.data); });
+      client.on("disconnected", function () { if (!net.closed) lose(); });
+      client.on("connected", function (ev) {
+        if (net.closed) return;
+        if (!ev.isReconnect) return;   // first connect handled below
+        if (net.role === "guest") startJoining();
+        else setStatus(net.open ? "connected" : "waiting");
+      });
+      client.on("server-error", function (e) {
+        if (net.closed) return;
+        var code = e && e.code ? String(e.code) : "error";
+        if (/auth|key|unauthor|forbidden|permission/i.test(code)) {
+          setStatus("error", "Metered rejected the messaging key (" + code + "). Check CHESS_REALTIME_KEY in js/config.js and that the key allows Subscribe and Publish.");
+        }
+      });
+      client.connect().then(function () { return client.subscribe(channel()); }).then(function () {
+        if (net.closed) return;
+        if (role === "host") { setStatus("waiting"); post({ k: "host-here" }); } else startJoining();
+        clearInterval(net.hbTimer);
+        net.hbTimer = setInterval(function () {
+          if (!net.open) return;
+          post({ k: "hb", to: net.friend });
+          if (Date.now() - net.friendSeen > SILENCE_MS) lose();
+        }, HB_MS);
+      }).catch(function (e) {
+        if (net.closed) return;
+        setStatus("error", "Couldn't connect to Metered's messaging server (" + ((e && (e.code || e.message)) || "unknown error") +
+                  "). Check CHESS_REALTIME_KEY in js/config.js.");
+      });
+    }
+
+    net.host = function (code) { start("host", code); };
+    net.join = function (code) { start("guest", code); };
+    net.send = function (msg) { return net.open ? post({ k: "msg", to: net.friend, m: msg }) : false; };
+    net.connected = function () { return net.open; };
+    net.leave = function (tellFriend) {
+      if (tellFriend && net.open) post({ k: "msg", to: net.friend, m: { t: "bye" } });
+      net.closed = true; net.open = false;
+      clearInterval(net.hbTimer); clearInterval(net.joinTimer);
+      var c = net.client; net.client = null;
+      if (c) setTimeout(function () { c.close().catch(function () { /* ignore */ }); }, tellFriend ? 300 : 0);
+      net.status = "idle";
+    };
+    return net;
+  }
+
+  var api = { create: create, createMetered: createMetered, meteredAvailable: meteredAvailable, createManual: createManual, diagnose: diagnose, makeCode: makeCode, cleanCode: cleanCode, supported: supported };
   root.ChessNet = api;
 })(window);

@@ -327,7 +327,7 @@
           function () { online.status = "error"; online.detail = "Couldn't set up the direct connection in this browser."; renderAll(); });
       }
     } else {
-      online.net = Net.create(handlers);
+      online.net = Net.meteredAvailable() ? Net.createMetered(handlers) : Net.create(handlers);
       if (o.role === "host") { saveHostSession(); online.net.host(o.code); }
       else online.net.join(o.code);
     }
@@ -842,7 +842,7 @@
 
   function runDiagnostics() {
     var out = $("diagOut"), btn = $("btnDiag");
-    out.hidden = false; out.textContent = "Testing… (up to 10 seconds)\n"; btn.disabled = true;
+    out.hidden = false; out.textContent = "Testing… (up to 25 seconds)\n"; btn.disabled = true;
     Net.diagnose(function (line) { out.textContent += line + "\n"; }).then(function () {
       out.textContent += "Done. If you ask for help, send a screenshot of this box.\n"; btn.disabled = false;
     });
