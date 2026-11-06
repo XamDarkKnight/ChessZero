@@ -58,7 +58,11 @@
     var list = root.CHESS_ICE_SERVERS;
     return Array.isArray(list) ? list.filter(function (x) { return x && x.urls; }) : [];
   }
-  function allIce() { return relayIce.concat(pastedIce(), DEFAULT_ICE); }
+  function allIce() {
+    var own = relayIce.concat(pastedIce());
+    // With your own relay set up, skip the free public relays: they are often down and only slow the connection.
+    return own.length ? own.concat([DEFAULT_ICE[0]]) : DEFAULT_ICE;
+  }
 
   // Tests can set window.CHESS_PEER_CONFIG to point at a private matchmaking server. Normal play leaves it unset.
   function peerOptions() {
@@ -416,7 +420,41 @@
       pc.createOffer().then(function (o) { return pc.setLocalDescription(o); });
       setTimeout(finish, 6000);
     }); });
-    return Promise.all([server, ice]);
+    // Try each of your own relay servers on its own, so we can see which connection types this network allows.
+    var perRelay = ice.then(function () {
+      var list = [];
+      relayIce.concat(pastedIce()).forEach(function (srv) {
+        [].concat(srv.urls).forEach(function (u) {
+          if (/^turns?:/.test(u)) list.push({ urls: u, username: srv.username, credential: srv.credential });
+        });
+      });
+      if (!list.length || !root.RTCPeerConnection) return;
+      log("INFO  Testing each relay route (up to 12 seconds)…");
+      return Promise.all(list.map(function (srv) {
+        return new Promise(function (resolve) {
+          var got = false, ended = false, pc;
+          var label = srv.urls.replace(/^(turns?):([^?]+)(\?transport=(\w+))?$/, function (m, scheme, host, q, tr) {
+            return (scheme === "turns" ? "secure " : "") + (tr || "udp").toUpperCase() + " port " + host.split(":")[1];
+          });
+          function done() {
+            if (ended) return; ended = true;
+            try { pc.close(); } catch (e) { /* ignore */ }
+            log((got ? "OK    Relay route works: " : "FAIL  Relay route blocked: ") + label);
+            resolve();
+          }
+          try { pc = new root.RTCPeerConnection({ iceServers: [srv], iceTransportPolicy: "relay" }); }
+          catch (e) { log("FAIL  Relay route not usable: " + label); return resolve(); }
+          pc.onicecandidate = function (e) {
+            if (e.candidate && / typ relay/.test(e.candidate.candidate)) { got = true; done(); }
+            else if (!e.candidate) done();
+          };
+          pc.createDataChannel("t");
+          pc.createOffer().then(function (o) { return pc.setLocalDescription(o); }).catch(done);
+          setTimeout(done, 12000);
+        });
+      }));
+    });
+    return Promise.all([server, ice, perRelay]);
   }
 
   var api = { create: create, createManual: createManual, diagnose: diagnose, makeCode: makeCode, cleanCode: cleanCode, supported: supported };
