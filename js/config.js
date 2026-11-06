@@ -4,8 +4,8 @@
  */
 
 // Option 1: paste the API address from metered.ca between the quotes, e.g.
-// "https://YOUR-APP.metered.live/api/v1/turn/credentials?apiKey=7740ee272537b61d46952c22f6e9efc9e2f8"
-window.CHESS_TURN_API_URL = "";
+// "https://YOUR-APP.metered.live/api/v1/turn/credentials?apiKey=YOUR_API_KEY"
+window.CHESS_TURN_API_URL = "https://chesszero.metered.live/api/v1/turn/credentials?apiKey=7740ee272537b61d46952c22f6e9efc9e2f8";
 
 // Option 2: paste the iceServers list from metered.ca's "configuration snippet" between the [ ].
 // It is a list of { urls: ..., username: ..., credential: ... } entries.
