@@ -53,7 +53,12 @@
     ]);
     return relayLoad;
   }
-  function allIce() { return relayIce.concat(DEFAULT_ICE); }
+  // Relay servers pasted straight into js/config.js (the "configuration snippet" from metered.ca).
+  function pastedIce() {
+    var list = root.CHESS_ICE_SERVERS;
+    return Array.isArray(list) ? list.filter(function (x) { return x && x.urls; }) : [];
+  }
+  function allIce() { return relayIce.concat(pastedIce(), DEFAULT_ICE); }
 
   // Tests can set window.CHESS_PEER_CONFIG to point at a private matchmaking server. Normal play leaves it unset.
   function peerOptions() {
@@ -382,7 +387,8 @@
 
     var ice = loadRelay().then(function () { return new Promise(function (resolve) {
       if (!root.RTCPeerConnection) return resolve();
-      if (relayInfo === "none") log("INFO  No relay key set in js/config.js (see README, \"Relay\").");
+      if (pastedIce().length) log("OK    Relay settings found in js/config.js (" + pastedIce().length + " entries)");
+      if (relayInfo === "none") { if (!pastedIce().length) log("INFO  No relay set in js/config.js (see README, \"Relay\")."); }
       else if (relayInfo === "ok") log("OK    Relay key works (" + relayIce.length + " relay servers loaded)");
       else log("FAIL  The relay key in js/config.js didn't work. Check the address you pasted.");
       var types = {}, pc = new root.RTCPeerConnection({ iceServers: allIce() });
