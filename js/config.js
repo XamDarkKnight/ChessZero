@@ -17,4 +17,4 @@ window.CHESS_ICE_SERVERS = [
 // In metered.ca: Realtime Messaging -> Keys -> Create key -> type "Publishable",
 // with Subscribe and Publish switched on. Paste the "pk_live_..." value between the quotes.
 // When this is set, online games send moves through Metered's server instead of connecting the browsers directly.
-window.CHESS_REALTIME_KEY = "";
+window.CHESS_REALTIME_KEY = "pk_live_e044a355694e5ad30c2d5c1e39f2ea949809ff27";
