@@ -314,13 +314,23 @@
       connected: false, started: false, friendLeft: false,
       offerIn: false, offerOut: false, rematchMine: false, rematchTheirs: false
     };
-    online.net = Net.create({
+    var handlers = {
       onStatus: onNetStatus,
       onMessage: onNetMessage,
       onOpen: function () { if (online.role === "guest") online.net.send({ t: "hello" }); }
-    });
-    if (o.role === "host") { saveHostSession(); online.net.host(o.code); }
-    else online.net.join(o.code);
+    };
+    if (o.manual) {
+      online.manual = true; online.status = "waiting"; online.outCode = ""; online.step = o.role === "host" ? "making" : "paste-offer";
+      online.net = Net.createManual(handlers);
+      if (o.role === "host") {
+        online.net.host().then(function (code) { online.outCode = code; online.step = "send-offer"; renderAll(); },
+          function () { online.status = "error"; online.detail = "Couldn't set up the direct connection in this browser."; renderAll(); });
+      }
+    } else {
+      online.net = Net.create(handlers);
+      if (o.role === "host") { saveHostSession(); online.net.host(o.code); }
+      else online.net.join(o.code);
+    }
     renderAll();
   }
 
@@ -483,7 +493,7 @@
   /* The host can refresh the page and carry on: the game is kept in this browser for a while. */
   function saveHostSession() {
     var o = G.online;
-    if (!o || o.role !== "host" || G.result) return;
+    if (!o || o.role !== "host" || o.manual || G.result) return;
     store("session", JSON.stringify({ code: o.code, myColor: G.myColor, clockMs: G.clockMs, moves: movesArray(),
                                       w: G.clock.w, b: G.clock.b, ts: Date.now() }));
   }
@@ -705,8 +715,11 @@
       if (o.status === "full") return "This game already has two players.";
       if (o.status === "error") return o.detail;
       if (o.friendLeft) return "Your friend left the game.";
-      if (!o.started) return o.role === "host" ? "Waiting for your friend to open the link…" : "Connecting to the game…";
-      if (!o.connected) return "Your friend is disconnected. The game waits for them to come back…";
+      if (!o.started) {
+        if (o.manual) return o.role === "host" ? "Send your friend the code above, then paste their reply code." : "Paste the code your friend sent you, then send back your reply code.";
+        return o.role === "host" ? "Waiting for your friend to open the link…" : "Connecting to the game…";
+      }
+      if (!o.connected) return o.manual ? "The direct connection was lost. Leave the game and set up a new one." : "Your friend is disconnected. The game waits for them to come back…";
       return (pos.turn === G.myColor ? "Your move." : "Your friend's move.") + chk;
     }
     if (G.mode === "bot") {
@@ -782,9 +795,57 @@
     if (o.status === "not-found" || o.status === "full" || o.status === "error") { cls = "bad"; msg = o.status === "full" ? "Game is full" : o.status === "not-found" ? "Game not found" : "Connection problem"; }
     dot.className = "conn-dot " + cls;
     text.textContent = msg;
-    var showLink = o.role === "host" && !(o.started && o.connected && G.played.length > 0);
+    var showLink = o.role === "host" && !o.manual && !(o.started && o.connected && G.played.length > 0);
     $("linkBox").hidden = !showLink;
     if (showLink) $("linkInput").value = linkFor(o.code);
+    renderManual();
+  }
+
+  function renderManual() {
+    var o = G.online, box = $("manualBox");
+    var show = !!(o && o.manual && !o.started && o.status !== "error" && o.status !== "connected");
+    box.hidden = !show;
+    if (!show) return;
+    var out = o.step === "send-offer" || o.step === "send-answer";
+    var inp = o.step === "send-offer" || o.step === "paste-offer";
+    $("manualOutWrap").hidden = !out;
+    $("manualInWrap").hidden = !inp;
+    if (out && $("manualOut").value !== o.outCode) $("manualOut").value = o.outCode;
+    var hint = { making: "Making your code…",
+                 "send-offer": "Step 1: copy this code and send it to your friend. Step 2: paste the reply code they send back, then press Connect.",
+                 "paste-offer": "Paste the code your friend sent you, then press Make reply code.",
+                 "send-answer": "Now send this reply code back to your friend. The game starts as soon as they press Connect." }[o.step];
+    $("manualHint").textContent = hint || "";
+    $("manualInLabel").textContent = o.step === "send-offer" ? "Paste your friend's reply code here" : "Paste your friend's code here";
+    $("btnManualGo").textContent = o.step === "send-offer" ? "Connect" : "Make reply code";
+  }
+
+  function manualGo() {
+    var o = G.online;
+    if (!o || !o.manual) return;
+    var text = $("manualIn").value;
+    if (o.step === "send-offer") {
+      o.net.acceptAnswer(text).then(function () { notify("Connecting…"); $("manualIn").value = ""; },
+        function (e) { notify(e.message || "That code didn't work."); });
+    } else if (o.step === "paste-offer") {
+      o.step = "making"; renderAll();
+      o.net.join(text).then(function (code) { o.outCode = code; o.step = "send-answer"; $("manualIn").value = ""; renderAll(); },
+        function (e) { o.step = "paste-offer"; renderAll(); notify(e.message || "That code didn't work."); });
+    }
+  }
+
+  function startDirect(role) {
+    var choice = $("selColorOnline").value;
+    var color = choice === "random" ? (Math.random() < 0.5 ? "w" : "b") : choice;
+    startOnline({ role: role, code: "direct", myColor: role === "host" ? color : "b", clockMs: role === "host" ? readClock("selClockOnline") : 0, manual: true });
+  }
+
+  function runDiagnostics() {
+    var out = $("diagOut"), btn = $("btnDiag");
+    out.hidden = false; out.textContent = "Testing… (up to 10 seconds)\n"; btn.disabled = true;
+    Net.diagnose(function (line) { out.textContent += line + "\n"; }).then(function () {
+      out.textContent += "Done. If you ask for help, send a screenshot of this box.\n"; btn.disabled = false;
+    });
   }
 
   function renderOffer() {
@@ -939,6 +1000,17 @@
     });
     $("btnCreate").addEventListener("click", createOnlineGame);
     $("btnCopy").addEventListener("click", copyLink);
+    $("btnDirectHost").addEventListener("click", function () { startDirect("host"); });
+    $("btnDirectJoin").addEventListener("click", function () { startDirect("guest"); });
+    $("btnManualGo").addEventListener("click", manualGo);
+    $("btnDiag").addEventListener("click", runDiagnostics);
+    $("btnManualCopy").addEventListener("click", function () {
+      var t = $("manualOut"), b = this;
+      t.select();
+      var done = function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy code"; }, 1800); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t.value).then(done, function () { try { document.execCommand("copy"); done(); } catch (e) { /* selected for manual copy */ } });
+      else { try { document.execCommand("copy"); done(); } catch (e) { /* selected for manual copy */ } }
+    });
     $("btnNewLink").addEventListener("click", function () { store("room", null); renderAll(); notify("Done. Your next game gets a brand new link."); });
     Array.prototype.forEach.call(document.querySelectorAll("#stickers button"), function (b) {
       b.addEventListener("click", function () { sendSticker(b.dataset.e); });

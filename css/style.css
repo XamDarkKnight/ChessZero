@@ -421,6 +421,16 @@ h1 { margin: 0 0 6px; color: var(--red); font-size: 30px; letter-spacing: -0.5px
 .promo-btn .piece { font-size: inherit; pointer-events: none; }
 .promo-btn .name { display: block; font: 900 12px Arial, sans-serif; color: #fff; margin-top: 4px; text-shadow: 0 1px 2px #000; }
 
+/* Direct mode */
+.direct { font-size: 14px; }
+.direct summary { cursor: pointer; font-weight: 900; color: var(--dark); }
+.direct[open] summary { margin-bottom: 8px; }
+.direct .btn.wide { margin-top: 10px; }
+.input.code { font-size: 12px; resize: vertical; word-break: break-all; line-height: 1.35; }
+#manualBox { display: flex; flex-direction: column; gap: 10px; }
+#manualBox .field .btn { align-self: flex-start; }
+.diag { margin: 10px 0 0; padding: 10px; background: #111; color: #e8e8e8; border-radius: 10px; font: 12px/1.5 Consolas, Monaco, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* Reactions and stickers */
 .stickers { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
 .stickers button { font-size: 22px; line-height: 1; padding: 6px 9px; border: 2px solid #ddd; border-radius: 10px; background: #fff; cursor: pointer; }

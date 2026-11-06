@@ -46,11 +46,11 @@
   function create(handlers) {
     var net = {
       role: null, code: null,
-      peer: null, conn: null, pendingConn: null,
+      peer: null, conn: null,
       closed: false,
       status: "idle",
       lastSeen: 0, everConnected: false, directFails: 0,
-      hbTimer: null, retryTimer: null, pendingTimer: null, attempts: 0
+      hbTimer: null, retryTimer: null, attempts: 0
     };
 
     function setStatus(status, detail) {
@@ -61,14 +61,6 @@
     function clearTimers() {
       clearInterval(net.hbTimer); clearTimeout(net.retryTimer);
       net.hbTimer = null; net.retryTimer = null;
-    }
-
-    function clearPending(conn) {
-      if (conn && net.pendingConn !== conn) return false;
-      clearTimeout(net.pendingTimer);
-      net.pendingTimer = null;
-      net.pendingConn = null;
-      return true;
     }
 
     function startHeartbeat() {
@@ -91,11 +83,6 @@
     }
 
     function attach(conn) {
-      if (net.closed || (net.pendingConn && net.pendingConn !== conn)) {
-        try { conn.close(); } catch (e) { /* already closed */ }
-        return;
-      }
-      clearPending(conn);
       net.conn = conn;
       net.everConnected = true;
       net.lastSeen = Date.now();
@@ -144,35 +131,14 @@
       });
       peer.on("connection", function (conn) {
         if (net.conn && net.conn.open) {
-          function rejectFullConnection() {
+          conn.on("open", function () {
             try { conn.send({ t: "full" }); } catch (e) { /* ignore */ }
             setTimeout(function () { try { conn.close(); } catch (e) { /* ignore */ } }, 400);
-          }
-          if (conn.open) rejectFullConnection(); else conn.on("open", rejectFullConnection);
+          });
           return;
-        }
-        if (net.pendingConn) {
-          try { conn.close(); } catch (e) { /* already closed */ }
-          return;
-        }
-        if (net.conn) dropConnection();
-        net.pendingConn = conn;
-        net.pendingTimer = setTimeout(function () {
-          if (net.pendingConn !== conn) return;
-          clearPending(conn);
-          try { conn.close(); } catch (e) { /* already closed */ }
-        }, 12000);
-        conn.on("close", function () { clearPending(conn); });
-        conn.on("error", function () { clearPending(conn); });
-        function onConnectionOpen() {
-          if (net.closed || net.peer !== peer || net.pendingConn !== conn) {
-            try { conn.close(); } catch (e) { /* already closed */ }
-            return;
-          }
-          attach(conn);
         }
         // Wait for the data channel to open before announcing "connected".
-        if (conn.open) onConnectionOpen(); else conn.on("open", onConnectionOpen);
+        if (conn.open) attach(conn); else conn.on("open", function () { attach(conn); });
       });
       peer.on("disconnected", function () {
         if (!net.closed && net.peer === peer) { try { peer.reconnect(); } catch (e) { /* will be retried on error */ } }
@@ -225,16 +191,11 @@
 
     function connectToHost() {
       if (net.closed || (net.conn && net.conn.open)) return;
-      if (net.pendingConn) return;
       if (!net.peer || net.peer.destroyed || net.peer.disconnected) { scheduleGuestRetry(2500); return; }
-      clearTimeout(net.retryTimer);
-      net.retryTimer = null;
       if (net.status !== "away") setStatus("connecting");
       var conn = net.peer.connect(PREFIX + net.code, { reliable: true });
-      net.pendingConn = conn;
       var gaveUp = setTimeout(function () {
-        if (net.pendingConn === conn && !net.closed) {
-          clearPending(conn);
+        if (!conn.open && !net.closed) {
           try { conn.close(); } catch (e) { /* ignore */ }
           if (!net.everConnected && ++net.directFails >= 2) {
             setStatus("error", "Found the game, but the two browsers couldn't connect directly. Your network (or your friend's) may block this. Try a different network, such as a phone hotspot, or turn off any VPN. Still retrying…");
@@ -242,26 +203,7 @@
           scheduleGuestRetry(1500);
         }
       }, 12000);
-      net.pendingTimer = gaveUp;
-      conn.on("open", function () {
-        if (net.closed || net.pendingConn !== conn) {
-          try { conn.close(); } catch (e) { /* already closed */ }
-          return;
-        }
-        clearPending(conn);
-        net.attempts = 0;
-        attach(conn);
-      });
-      conn.on("close", function () {
-        if (net.pendingConn !== conn) return;
-        clearPending(conn);
-        scheduleGuestRetry(1500);
-      });
-      conn.on("error", function () {
-        if (net.pendingConn !== conn) return;
-        clearPending(conn);
-        scheduleGuestRetry(1500);
-      });
+      conn.on("open", function () { clearTimeout(gaveUp); net.attempts = 0; attach(conn); });
     }
 
     /* ---------- shared ---------- */
@@ -276,13 +218,9 @@
     function closeAll(keepStatus) {
       net.closed = true;
       clearTimers();
-      clearTimeout(net.pendingTimer);
-      net.pendingTimer = null;
-      var c = net.conn, pending = net.pendingConn, p = net.peer;
+      var c = net.conn, p = net.peer;
       net.conn = null; net.peer = null;
-      net.pendingConn = null;
       if (c) { try { c.close(); } catch (e) { /* ignore */ } }
-      if (pending && pending !== c) { try { pending.close(); } catch (e) { /* ignore */ } }
       if (p) { try { p.destroy(); } catch (e) { /* ignore */ } }
       if (!keepStatus) net.status = "idle";
     }
@@ -295,6 +233,148 @@
     return net;
   }
 
-  var api = { create: create, makeCode: makeCode, cleanCode: cleanCode, supported: supported };
+  /* ---------- direct mode: no matchmaking server ----------
+   * The two players swap two short codes (for example over WhatsApp) and the browsers connect straight to each other.
+   * On the same Wi-Fi this needs nothing from the internet. */
+  var DEFAULT_ICE = [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" }
+  ];
+
+  function iceConfig() {
+    var c = root.CHESS_PEER_CONFIG && root.CHESS_PEER_CONFIG.config;
+    return c || { iceServers: DEFAULT_ICE };
+  }
+
+  function createManual(handlers) {
+    var net = { manual: true, role: null, pc: null, dc: null, closed: false, status: "idle" };
+
+    function setStatus(status, detail) {
+      net.status = status;
+      if (handlers.onStatus) handlers.onStatus(status, detail || "");
+    }
+    function encode(desc) { return btoa(JSON.stringify({ t: desc.type, s: desc.sdp })); }
+    function decode(text, want) {
+      try {
+        var o = JSON.parse(atob(String(text || "").replace(/\s+/g, "")));
+        if (o && o.t === want && typeof o.s === "string") return { type: o.t, sdp: o.s };
+      } catch (e) { /* fall through */ }
+      return null;
+    }
+    function gathered(pc) {
+      return new Promise(function (resolve) {
+        if (pc.iceGatheringState === "complete") return resolve();
+        var done = false;
+        function finish() { if (!done) { done = true; resolve(); } }
+        pc.addEventListener("icegatheringstatechange", function () { if (pc.iceGatheringState === "complete") finish(); });
+        setTimeout(finish, 5000);
+      });
+    }
+    function watch(pc) {
+      pc.onconnectionstatechange = function () {
+        if (net.closed) return;
+        if (pc.connectionState === "failed") {
+          setStatus("error", "The two browsers couldn't reach each other. Make sure you are on the same Wi-Fi. Guest or public Wi-Fi often blocks devices from talking to each other, and a VPN can too.");
+        } else if (pc.connectionState === "disconnected" || pc.connectionState === "closed") {
+          setStatus("away");
+        }
+      };
+    }
+    function wire(dc) {
+      net.dc = dc;
+      dc.onopen = function () { setStatus("connected"); if (handlers.onOpen) handlers.onOpen(dc); };
+      dc.onmessage = function (e) {
+        var msg; try { msg = JSON.parse(e.data); } catch (x) { return; }
+        if (!msg || msg.t === "hb") return;
+        if (handlers.onMessage) handlers.onMessage(msg);
+      };
+      dc.onclose = function () { if (!net.closed) setStatus("away"); };
+    }
+
+    // Host: resolves with the code to send to the friend.
+    net.host = function () {
+      net.role = "host";
+      var pc = net.pc = new root.RTCPeerConnection(iceConfig());
+      watch(pc);
+      wire(pc.createDataChannel("chess"));
+      return pc.createOffer().then(function (o) { return pc.setLocalDescription(o); })
+        .then(function () { return gathered(pc); })
+        .then(function () { setStatus("waiting"); return encode(pc.localDescription); });
+    };
+    // Host: apply the friend's reply code.
+    net.acceptAnswer = function (text) {
+      var d = decode(text, "answer");
+      if (!d) return Promise.reject(new Error("That isn't a reply code. Paste the whole code your friend sent back."));
+      return net.pc.setRemoteDescription(d);
+    };
+    // Guest: resolves with the reply code to send back to the host.
+    net.join = function (text) {
+      net.role = "guest";
+      var d = decode(text, "offer");
+      if (!d) return Promise.reject(new Error("That isn't a game code. Paste the whole code your friend sent you."));
+      var pc = net.pc = new root.RTCPeerConnection(iceConfig());
+      watch(pc);
+      pc.ondatachannel = function (e) { wire(e.channel); };
+      return pc.setRemoteDescription(d).then(function () { return pc.createAnswer(); })
+        .then(function (a) { return pc.setLocalDescription(a); })
+        .then(function () { return gathered(pc); })
+        .then(function () { setStatus("waiting"); return encode(pc.localDescription); });
+    };
+    net.send = function (msg) {
+      if (!net.dc || net.dc.readyState !== "open") return false;
+      try { net.dc.send(JSON.stringify(msg)); return true; } catch (e) { return false; }
+    };
+    net.connected = function () { return !!(net.dc && net.dc.readyState === "open"); };
+    net.leave = function (tellFriend) {
+      if (tellFriend) net.send({ t: "bye" });
+      net.closed = true;
+      try { if (net.dc) net.dc.close(); } catch (e) { /* ignore */ }
+      try { if (net.pc) net.pc.close(); } catch (e) { /* ignore */ }
+      net.dc = null; net.pc = null; net.status = "idle";
+    };
+    return net;
+  }
+
+  /* ---------- "Test my connection" ---------- */
+  function diagnose(log) {
+    log(root.Peer ? "OK    Game library loaded" : "FAIL  Game library did not load. Re-upload the vendor folder to GitHub.");
+    log(root.RTCPeerConnection ? "OK    This browser supports direct connections" : "FAIL  This browser can't do direct connections. Try Chrome, Edge, Firefox or Safari.");
+
+    var server = new Promise(function (resolve) {
+      var ws, done = false;
+      function end(line) { if (!done) { done = true; clearTimeout(t); log(line); try { ws.close(); } catch (e) { /* ignore */ } resolve(); } }
+      var t = setTimeout(function () { end("FAIL  Matchmaking server (0.peerjs.com) didn't answer in 8 seconds. It may be down or blocked on this network."); }, 8000);
+      try { ws = new WebSocket("wss://0.peerjs.com/peerjs?key=peerjs&id=diag" + makeCode(8) + "&token=" + makeCode(8)); }
+      catch (e) { end("FAIL  Matchmaking server can't be contacted from this page."); return; }
+      ws.onopen = function () { end("OK    Matchmaking server reachable"); };
+      ws.onerror = function () { end("FAIL  Matchmaking server (0.peerjs.com) is down or blocked on this network (try turning off ad blockers or a VPN)."); };
+    });
+
+    var ice = new Promise(function (resolve) {
+      if (!root.RTCPeerConnection) return resolve();
+      var types = {}, pc = new root.RTCPeerConnection({ iceServers: DEFAULT_ICE });
+      var finish = function () {
+        try { pc.close(); } catch (e) { /* ignore */ }
+        var found = Object.keys(types);
+        if (!found.length) log("FAIL  No network addresses found at all. Something is blocking WebRTC in this browser.");
+        else {
+          log("INFO  Address types found: " + found.join(", "));
+          if (types.srflx || types.relay) log("OK    This network can reach the internet for direct connections");
+          else log("WARN  Only local addresses found. Online play over the internet will likely fail here, but Direct mode on the same Wi-Fi can still work.");
+        }
+        resolve();
+      };
+      pc.onicecandidate = function (e) {
+        if (!e.candidate) return finish();
+        var m = /typ (\w+)/.exec(e.candidate.candidate); if (m) types[m[1]] = 1;
+      };
+      pc.createDataChannel("t");
+      pc.createOffer().then(function (o) { return pc.setLocalDescription(o); });
+      setTimeout(finish, 6000);
+    });
+    return Promise.all([server, ice]);
+  }
+
+  var api = { create: create, createManual: createManual, diagnose: diagnose, makeCode: makeCode, cleanCode: cleanCode, supported: supported };
   root.ChessNet = api;
 })(window);

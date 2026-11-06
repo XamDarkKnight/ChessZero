@@ -28,6 +28,18 @@ Any static host works too (Netlify, Cloudflare Pages, Vercel). Just upload the s
 
 Opening `index.html` straight from your computer works for Pass & play and Vs bot. Online play needs the hosted version, because the link has to be a web address your friend can open.
 
+## Won't connect? Use Direct mode (same Wi-Fi, no server)
+
+Normal online play needs the free PeerJS matchmaking server on the internet. If the link just says "Connecting", open **Won't connect? Play directly on the same Wi-Fi** on the Online tab:
+
+1. One player clicks **I'll host**, then **Copy code**, and sends the code to the other player (WhatsApp works).
+2. The other player clicks **I'll join**, pastes the code, clicks **Make reply code**, then copies the reply and sends it back.
+3. The host pastes the reply and clicks **Connect**. The game starts.
+
+This uses no server at all, so it works even when the matchmaking server is down. You need a new pair of codes for each session, but rematches inside a session don't need new codes. It needs both devices on the same normal Wi-Fi. Guest or public Wi-Fi often blocks devices from seeing each other.
+
+**Test my connection** (in the same section) checks the game library, the matchmaking server and your network, and says which one is the problem.
+
 ## How online play works
 
 - You click **Create game**. Your browser registers a short game code with the free public [PeerJS](https://peerjs.com) matchmaking server.

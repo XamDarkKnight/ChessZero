@@ -60,6 +60,17 @@
         <button class="btn primary wide" id="btnCreate" type="button">Create game &amp; get link</button>
         <p class="note">You get a link to send your friend. <b>It stays the same every time</b>, so you can keep it in your chat or bookmark it. No sign-up for either of you.</p>
         <button class="btn ghost wide" id="btnNewLink" type="button" hidden>Use a brand new link instead</button>
+
+        <details class="direct" id="directBox">
+          <summary>Won't connect? Play directly on the same Wi-Fi</summary>
+          <p class="note">No server needed. One of you hosts and gets a code, sends it to the other over WhatsApp, and the other sends a reply code back. Then the game starts. (Your colour and clock choices above apply to the host.)</p>
+          <div class="row2">
+            <button class="btn" id="btnDirectHost" type="button">I'll host</button>
+            <button class="btn" id="btnDirectJoin" type="button">I'll join</button>
+          </div>
+          <button class="btn ghost wide" id="btnDiag" type="button">Test my connection</button>
+          <pre class="diag" id="diagOut" hidden></pre>
+        </details>
       </div>
 
       <div id="onlineLive" hidden>
@@ -74,6 +85,19 @@
               <input id="linkInput" class="input" type="text" readonly value="">
               <button class="btn" id="btnCopy" type="button">Copy</button>
             </div>
+          </label>
+        </div>
+        <div id="manualBox" hidden>
+          <p class="note" id="manualHint"></p>
+          <label class="field" id="manualOutWrap" hidden>
+            <span>Send this code to your friend</span>
+            <textarea id="manualOut" class="input code" rows="4" readonly></textarea>
+            <button class="btn" id="btnManualCopy" type="button">Copy code</button>
+          </label>
+          <label class="field" id="manualInWrap" hidden>
+            <span id="manualInLabel">Paste the code here</span>
+            <textarea id="manualIn" class="input code" rows="4" placeholder="Paste here"></textarea>
+            <button class="btn primary" id="btnManualGo" type="button">Go</button>
           </label>
         </div>
         <button class="btn ghost wide" id="btnLeave" type="button">Leave game</button>
