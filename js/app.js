@@ -842,7 +842,7 @@
 
   function runDiagnostics() {
     var out = $("diagOut"), btn = $("btnDiag");
-    out.hidden = false; out.textContent = "Testing… (up to 10 seconds)\n"; btn.disabled = true;
+    out.hidden = false; out.textContent = "Testing… (up to 25 seconds)\n"; btn.disabled = true;
     Net.diagnose(function (line) { out.textContent += line + "\n"; }).then(function () {
       out.textContent += "Done. If you ask for help, send a screenshot of this box.\n"; btn.disabled = false;
     });
